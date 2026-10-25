@@ -1,0 +1,34 @@
+{
+  "base": {
+    "model_name": "hybrid_resnet50",
+    "head": "reupload",
+    "output": "softmax",
+    "n_qubits": 8,
+    "n_layers": 4,
+    "ansatz": "strongly",
+    "quantum_device": "default.qubit",
+    "diff_method": "backprop",
+    "quantum_run_on": "cpu",
+    "input_size": [224, 224],
+    "pretrained": true,
+    "train_layer4": true,
+    "epochs": 200,
+    "patience": 15,
+    "lr_patience": 6,
+    "batch_size": 32,
+    "learning_rate": 0.0001,
+    "head_learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "use_class_weights": true,
+    "class_weight_scheme": "balanced",
+    "augment": true,
+    "hflip": false,
+    "num_workers": 4,
+    "selection_metric": "f1_macro"
+  },
+  "grid": {},
+  "selection": {
+    "metric": "val_f1_macro"
+  },
+  "_nota_grid": "Configuracao unica, fixada antes de rodar: backbone e treino identicos ao resnet50_rf classico (lr 1e-4, wd 1e-4, paciencias 15/6, augment ligado, que foi o unico hiperparametro com sinal na sensibilidade classica). n=8 qubits e L=4 camadas pela faixa dominante na revisao. Sem grid para nao selecionar ruido: a variacao entre sementes e medida pelas replicas. H2 tem 4nL = 128 parametros no circuito (Rot + escalas)."
+}
