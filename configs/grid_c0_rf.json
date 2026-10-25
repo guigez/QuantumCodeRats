@@ -1,0 +1,32 @@
+{
+  "base": {
+    "model_name": "hybrid_resnet50",
+    "head": "linear",
+    "output": "softmax",
+    "rf_head": true,
+    "rf_n_estimators": 100,
+    "rf_class_weight": "balanced",
+    "rf_min_samples_leaf": 5,
+    "input_size": [224, 224],
+    "pretrained": true,
+    "train_layer4": true,
+    "epochs": 200,
+    "patience": 15,
+    "lr_patience": 6,
+    "batch_size": 32,
+    "learning_rate": 0.0001,
+    "head_learning_rate": 0.0001,
+    "weight_decay": 0.0001,
+    "use_class_weights": true,
+    "class_weight_scheme": "balanced",
+    "augment": true,
+    "hflip": false,
+    "num_workers": 4,
+    "selection_metric": "f1_macro"
+  },
+  "grid": {},
+  "selection": {
+    "metric": "val_f1_macro"
+  },
+  "_nota_grid": "Reproducao do resnet50_rf classico (configs/grid_resnet50_rf.json do classicalCodeRats) com a configuracao vencedora fixada: lr 1e-4 em tudo, inclusive na cabeca linear, wd 1e-4, paciencias 15/6, augment ligado, floresta de 100 arvores balanceada com min_samples_leaf 5. Um treino gera dois bracos: c0_rf_linear_head (C0) e c0_rf (C-RF). A selecao usa a validacao da floresta, como no classico. C1 e H1 usam head_learning_rate 1e-3; o controle casado em taxa para o H1 e o C1, nao o C0."
+}

@@ -40,7 +40,8 @@ def _familia(root, arm, accs, rng, seeds=(1, 2, 3), linear=False):
             _escreve(fam / "seeds" / f"seed_{s}", sid, a, rng)
             if linear:
                 _escreve(fam / "seeds" / f"seed_{s}", sid, a, rng, prefix="test_linear_head")
-            linhas.append({"seed": s, "val_f1_macro": a})
+            linhas.append({"seed": s, "val_f1_macro": a,
+                           **({"linear_val_f1_macro": a} if linear else {})})
         pd.DataFrame(linhas).to_csv(fam / "seeds" / "seeds_summary.csv", index=False)
 
 
@@ -50,24 +51,38 @@ def raizes(tmp_path):
     q, c = tmp_path / "quantum", tmp_path / "classical"
     _familia(q, "h1_vqc", {f: 0.95 for f in ANIMAIS}, rng)
     _familia(q, "c1_bottleneck", {f: 0.70 for f in ANIMAIS}, rng)
+    _familia(q, "c0_rf", {f: 0.65 for f in ANIMAIS}, rng, linear=True)
     _familia(c, "resnet50_rf", {f: 0.60 for f in ANIMAIS}, rng, linear=True)
     return [(q, None), (c, {"resnet50_rf_linear_head"})]
 
 
 def test_coleta_filtra_bracos_classicos(raizes):
     _, ps = collect_roots(raizes, list(ANIMAIS))
-    assert set(ps.arm) == {"h1_vqc", "c1_bottleneck", "resnet50_rf_linear_head"}
+    assert set(ps.arm) == {"h1_vqc", "c1_bottleneck", "c0_rf", "c0_rf_linear_head",
+                           "resnet50_rf_linear_head"}
     check_same_subjects(ps)
 
 
+def test_execucao_limpa_c0_e_crf_daqui(raizes):
+    so_quantico = raizes[:1]
+    _, rep = collect_roots(so_quantico, list(ANIMAIS), seeds=True)
+    diag = diagnostics(so_quantico, list(ANIMAIS), NOMES)
+    pares = default_pairs(sorted(rep.arm.unique()))
+    assert ("h1_vqc", "c0_rf_linear_head") in pares
+    dec = decision_table(rep, diag, pares, "f1_macro")
+    assert set(dec.verdict) == {"melhor"}
+    assert diag.loc[diag.arm == "c0_rf_linear_head", "val_f1_macro"].notna().all()
+
+
 def test_pares_padrao():
-    pares = default_pairs(["c1_bottleneck", "c1_ordinal", "h1_vqc", "h3_vqc_ordinal",
-                           "resnet50_rf_linear_head"])
+    pares = default_pairs(["c0_rf", "c0_rf_linear_head", "c1_bottleneck", "c1_ordinal",
+                           "h1_vqc", "h3_vqc_ordinal"])
     assert ("h1_vqc", "c1_bottleneck") in pares
     assert ("h1_vqc", "c1_ordinal") not in pares
     assert ("h3_vqc_ordinal", "c1_ordinal") in pares
     assert ("h3_vqc_ordinal", "c1_bottleneck") not in pares
-    assert ("h1_vqc", "resnet50_rf_linear_head") in pares
+    assert ("h1_vqc", "c0_rf_linear_head") in pares and ("h1_vqc", "c0_rf") in pares
+    assert all(not a.startswith("c") for a, _ in pares)
 
 
 def test_hibrido_claramente_melhor(raizes):

@@ -20,6 +20,16 @@ ReduceLROnPlateau na validacao — com tres diferencas, todas por necessidade:
      que encolhe para ~0 com o treino ainda longe da convergencia e o
      sintoma.
 
+FAMILIA c0_rf (C0 + C-RF)
+-------------------------
+Com `rf_head: true` (so com head="linear"), o candidato reproduz o
+resnet50_rf do classico em dois estagios: treina a ResNet50 com a cabeca
+linear e, congelada, ajusta StandardScaler + RandomForest sobre os vetores de
+2048 dimensoes dos quadros de treino SEM augmentation. A cabeca linear vira
+o braco C0 (arquivos *_linear_head) e a floresta o braco C-RF, no mesmo
+backbone e no mesmo teste. A selecao usa a validacao da floresta, como no
+classico.
+
 O TESTE nunca e tocado aqui. Quem avalia o teste e hybrid_grid.py, uma vez,
 depois de escolher o vencedor.
 """
@@ -40,6 +50,7 @@ from torch.utils.data import DataLoader
 from common import environment_info, seed_everything
 from dataset import ThermalFrameDataset, build_transforms, class_weights_from_split
 from metrics import compute_metrics, predictions_dataframe, save_all
+from models import extract_features, make_rf_pipeline
 
 from hybrid_models import create_hybrid_model
 
@@ -66,11 +77,39 @@ def build_loaders(fold_csv, images_dir, config) -> dict:
     loaders = {"train": DataLoader(ThermalFrameDataset(fold_csv, images_dir, "train", tf_treino),
                                    batch_size=bs, shuffle=True, generator=g,
                                    num_workers=nw, pin_memory=pin, drop_last=True)}
-    for split in ("val", "test"):
-        loaders[split] = DataLoader(ThermalFrameDataset(fold_csv, images_dir, split, tf_eval),
-                                    batch_size=bs, shuffle=False,
-                                    num_workers=nw, pin_memory=pin)
+    # train_eval: treino SEM augmentation, de onde saem as features da floresta.
+    for nome, split in (("train_eval", "train"), ("val", "val"), ("test", "test")):
+        loaders[nome] = DataLoader(ThermalFrameDataset(fold_csv, images_dir, split, tf_eval),
+                                   batch_size=bs, shuffle=False,
+                                   num_workers=nw, pin_memory=pin)
     return loaders
+
+
+def uses_forest(config) -> bool:
+    if not config.get("rf_head", False):
+        return False
+    if config.get("head", "vqc") != "linear":
+        raise ValueError("rf_head exige head='linear' (reproducao do resnet50_rf classico)")
+    return True
+
+
+def fit_forest(model, loaders, config, device):
+    """StandardScaler + RandomForest sobre as features do treino, ajustados so nele."""
+    Xtr, ytr, _, _ = extract_features(model.encoder, loaders["train_eval"], device)
+    rf = make_rf_pipeline(
+        n_estimators=int(config.get("rf_n_estimators", 100)),
+        class_weight=config.get("rf_class_weight", "balanced"),
+        seed=int(config.get("seed", 42)),
+        max_depth=config.get("rf_max_depth"),
+        min_samples_leaf=int(config.get("rf_min_samples_leaf", 1)),
+    )
+    rf.fit(Xtr, ytr)
+    return rf
+
+
+def forest_predict(model, rf, loader, device):
+    X, y, s, f = extract_features(model.encoder, loader, device)
+    return rf.predict_proba(X), y, s, f
 
 
 @torch.no_grad()
@@ -173,6 +212,7 @@ def run_environment() -> dict:
 def run_candidate(fold_csv, images_dir, config, out_dir, device, n_classes, class_names):
     """Treina UMA configuracao e devolve o resumo com as metricas de validacao."""
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
+    uses_forest(config)                       # config invalida falha antes de treinar
     seed_everything(int(config.get("seed", 42)))
 
     loaders = build_loaders(fold_csv, images_dir, config)
@@ -187,20 +227,41 @@ def run_candidate(fold_csv, images_dir, config, out_dir, device, n_classes, clas
                   indent=2, default=str)
 
     probs, y, s, f = infer(model, loaders["val"], device)
+    m = compute_metrics(y, probs.argmax(1), class_names)
+    extra = {}
+    if uses_forest(config):
+        # A cabeca linear vira o braco C0; a floresta passa a ser o candidato.
+        predictions_dataframe(f, s, y, probs.argmax(1), probs) \
+            .to_csv(out_dir / "predictions_val_linear_head.csv", index=False)
+        extra = {f"linear_val_{k}": v for k, v in m.items()}
+        import joblib
+        rf = fit_forest(model, loaders, config, device)
+        joblib.dump(rf, out_dir / "rf_head.joblib")
+        probs, y, s, f = forest_predict(model, rf, loaders["val"], device)
+        m = compute_metrics(y, probs.argmax(1), class_names)
     predictions_dataframe(f, s, y, probs.argmax(1), probs) \
         .to_csv(out_dir / "predictions_val.csv", index=False)
-    m = compute_metrics(y, probs.argmax(1), class_names)
-    return {"net_dir": str(out_dir), "cand_dir": str(out_dir), **resumo, **desc,
+    return {"net_dir": str(out_dir), "cand_dir": str(out_dir), **resumo, **desc, **extra,
             **{f"val_{k}": v for k, v in m.items()}}
 
 
 def evaluate_on_test(net_dir, fold_csv, images_dir, config, device, n_classes,
                      class_names, out_dir) -> dict:
-    """Avaliacao unica no teste, com o modelo ja congelado."""
+    """Avaliacao unica no teste, com o modelo ja congelado.
+
+    Com rf_head, grava tambem a cabeca linear (prefixo test_linear_head), que
+    o aggregate.py classico le como o braco <familia>_linear_head.
+    """
     loaders = build_loaders(fold_csv, images_dir, config)
     model = create_hybrid_model({**config, "pretrained": False}, n_classes).to(device)
     estado = torch.load(Path(net_dir) / "model.pt", map_location=device)
     model.load_state_dict(estado["model_state_dict"])
     probs, y, s, f = infer(model, loaders["test"], device)
+    if uses_forest(config):
+        save_all(predictions_dataframe(f, s, y, probs.argmax(1), probs),
+                 class_names, out_dir, prefix="test_linear_head")
+        import joblib
+        rf = joblib.load(Path(net_dir) / "rf_head.joblib")
+        probs, y, s, f = forest_predict(model, rf, loaders["test"], device)
     return save_all(predictions_dataframe(f, s, y, probs.argmax(1), probs),
                     class_names, out_dir, prefix="test")

@@ -10,28 +10,33 @@ vazamentos e falhas isoladas por par.
 
 Etapas por tarefa:
 
-  1. particao   copia as dobras do classico (--classical_results), o que
-                garante que o teste de cada fold e o MESMO animal nos dois
-                repositorios. Sem resultados classicos, gera as dobras com o
-                manifest.py e o splits.py do classico, em fixed_paired.
+  1. particao   por padrao gera as dobras aqui, a partir do metadata, com o
+                manifest.py e o splits.py do classico em fixed_paired
+                (teste 1, 9, 10, 11). Execucao limpa: nenhum resultado de
+                outra pasta e lido. Com --classical_results, copia as dobras
+                de la e inclui os bracos classicos na agregacao.
   2. grid       hybrid_grid.py por (fold, familia).
   3. sementes   hybrid_seeds.py, retreino do vencedor com --seeds.
-  4. agregacao  hybrid_aggregate.py, incluindo os bracos classicos.
+  4. SHAP       hybrid_shap.py no vencedor de cada (fold, familia). Imagens
+                completas (com esteira) por padrao: mascara por limiar R-B,
+                como o classico com --with_background. --no-shap desliga.
+  5. agregacao  hybrid_aggregate.py, incluindo o resumo de SHAP por braco.
 
-Familias (configs/grid_<familia>.json):
+Familias (configs/grid_<familia>.json), todas por padrao:
 
+  c0_rf            C0 e C-RF: ResNet50 + cabeca linear e, sobre ela,
+                   StandardScaler + RandomForest (reproducao do resnet50_rf
+                   classico; dois bracos de um treino)
   c1_bottleneck    C1   gargalo classico casado em parametros com o H1
   h1_vqc           H1   dressed quantum circuit
   h2_reupload      H2   circuito com re-uploading
   h3_vqc_ordinal   H3   circuito com saida ordinal (pulado no binario)
   c1_ordinal       C1-ord  controle classico da saida ordinal (idem)
-  c0_linear        C0   cabeca linear refeita neste codigo (opcional; a
-                        referencia principal e a cabeca linear do classico)
 
 Uso:
     python run_quantum.py --task binary --images_dir ../../_dataset/images \\
-        --classical_results ../../Classical/main_results --seeds 1 2 3 4 5
-    python run_quantum.py --task multiclass --families c1_bottleneck h1_vqc h3_vqc_ordinal c1_ordinal
+        --metadata ../../_dataset/metadata-1.csv --seeds 1 2 3 4 5
+    python run_quantum.py --task multiclass --families c1_bottleneck h1_vqc
 """
 
 from __future__ import annotations
@@ -56,9 +61,9 @@ from run_all import file_sha, grava_stamp, precisa_rodar, run_step, setup_loggin
 CONFIGS = ROOT / "configs"
 CLASSICAL_SRC = classical_bridge.CLASSICAL_ROOT / "src"
 TASK_CHOICES = ["multiclass", "three_bernini", "three_mlss", "binary"]
-ALL_FAMILIES = ("c1_bottleneck", "h1_vqc", "h2_reupload", "h3_vqc_ordinal",
-                "c1_ordinal", "c0_linear")
-DEFAULT_FAMILIES = ("c1_bottleneck", "h1_vqc")
+ALL_FAMILIES = ("c0_rf", "c1_bottleneck", "h1_vqc", "h2_reupload", "h3_vqc_ordinal",
+                "c1_ordinal")
+DEFAULT_FAMILIES = ALL_FAMILIES
 
 
 def prepare_splits(args, res: Path, log) -> bool:
@@ -80,9 +85,9 @@ def prepare_splits(args, res: Path, log) -> bool:
                 if (origem / extra).exists():
                     shutil.copy2(origem / extra, splits / extra)
             grava_stamp(stamp, params)
-            log.info(f"1/4 dobras copiadas do classico: {origem}")
+            log.info(f"1/5 dobras copiadas do classico: {origem}")
         else:
-            log.info(f"1/4 reusando dobras copiadas de {origem}")
+            log.info(f"1/5 reusando dobras copiadas de {origem}")
         return True
 
     if origem is not None:
@@ -98,7 +103,7 @@ def prepare_splits(args, res: Path, log) -> bool:
                      "manifesto"):
         ok, _ = run_step([py, str(CLASSICAL_SRC / "manifest.py"), "--metadata", args.metadata,
                           "--images_dir", args.images_dir, "--task", args.task,
-                          "--out", str(manifest), "--check_files"], log, "1/4 manifesto")
+                          "--out", str(manifest), "--check_files"], log, "1/5 manifesto")
         if not ok:
             return False
         grava_stamp(manifest.with_suffix(".params.json"), p_man)
@@ -110,7 +115,7 @@ def prepare_splits(args, res: Path, log) -> bool:
                           "--out_dir", str(splits), "--mode", "fixed_paired",
                           "--n_val_subjects", str(args.n_val_subjects),
                           "--seed", str(args.seed), "--fixed_test_subjects"]
-                         + [str(s) for s in args.fixed_test_subjects], log, "1/4 particao")
+                         + [str(s) for s in args.fixed_test_subjects], log, "1/5 particao")
         if not ok:
             return False
         grava_stamp(stamp, params)
@@ -124,8 +129,9 @@ def main() -> int:
     ap.add_argument("--metadata", default="metadata.csv")
     ap.add_argument("--results_dir", default="resultados")
     ap.add_argument("--classical_results", default=None,
-                    help="Raiz dos resultados classicos (contendo <tarefa>/splits e "
-                         "<tarefa>/fold_*). Fonte das dobras e dos bracos classicos.")
+                    help="Opcional. Raiz dos resultados classicos (contendo <tarefa>/splits "
+                         "e <tarefa>/fold_*): copia as dobras de la e inclui os bracos "
+                         "classicos. Sem ela, a execucao e limpa e nada de fora e lido.")
     ap.add_argument("--fixed_test_subjects", type=int, nargs="*", default=[1, 9, 10, 11])
     ap.add_argument("--n_val_subjects", type=int, default=2,
                     help="Mesmo padrao do run_all.py classico, para gerar dobras identicas.")
@@ -135,6 +141,12 @@ def main() -> int:
     ap.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     ap.add_argument("--families", nargs="*", default=list(DEFAULT_FAMILIES),
                     choices=list(ALL_FAMILIES))
+    ap.add_argument("--no-shap", action="store_true")
+    ap.add_argument("--background_removed", action="store_true",
+                    help="Imagens SEM a esteira (mascara exata do SHAP). Por padrao as "
+                         "imagens sao completas e a mascara e o limiar R-B do classico.")
+    ap.add_argument("--shap_background_size", type=int, default=32)
+    ap.add_argument("--shap_nsamples", type=int, default=200)
     ap.add_argument("--only-folds", type=int, nargs="*", default=None)
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
@@ -169,7 +181,7 @@ def main() -> int:
             familias.append(fam)
 
     # --- 2. grid ------------------------------------------------------
-    log.info("2/4 grid")
+    log.info("2/5 grid")
     for fold_csv in folds:
         for fam in familias:
             out = res / fold_csv.stem / fam
@@ -194,9 +206,9 @@ def main() -> int:
 
     # --- 3. sementes --------------------------------------------------
     if not args.seeds:
-        log.info("3/4 replicas por semente desligadas (use --seeds)")
+        log.info("3/5 replicas por semente desligadas (use --seeds)")
     else:
-        log.info(f"3/4 replicas por semente {args.seeds}")
+        log.info(f"3/5 replicas por semente {args.seeds}")
         for fold_csv in folds:
             for fam in familias:
                 out = res / fold_csv.stem / fam
@@ -215,8 +227,45 @@ def main() -> int:
                 if not ok:
                     falhas.append(f"replicas {fold_csv.stem}/{fam}")
 
-    # --- 4. agregacao -------------------------------------------------
-    log.info("4/4 agregacao")
+    # --- 4. SHAP ------------------------------------------------------
+    # So no vencedor do grid (seed --seed), como no classico: as replicas
+    # apagam model.pt.
+    if args.no_shap:
+        log.info("4/5 SHAP desligado")
+    else:
+        mascara = "fundo removido" if args.background_removed else "limiar R-B (imagens com esteira)"
+        log.info(f"4/5 SHAP  mascara: {mascara}")
+        for fold_csv in folds:
+            for fam in familias:
+                out = res / fold_csv.stem / fam
+                if not (out / "best_summary.csv").exists():
+                    log.warning(f"  {fold_csv.stem}/{fam} sem vencedor, pulando SHAP")
+                    continue
+                p = {"best_summary_sha": file_sha(out / "best_summary.csv"),
+                     "background_removed": args.background_removed,
+                     "background_size": args.shap_background_size,
+                     "nsamples": args.shap_nsamples, "seed": args.seed}
+                if not precisa_rodar(out / "shap" / "params.json",
+                                     out / "shap" / "shap_background_ratio.csv", p,
+                                     args.force, log, f"shap {fold_csv.stem}/{fam}"):
+                    log.info(f"  shap {fold_csv.stem}/{fam} ja concluido, pulando")
+                    continue
+                cmd = [py, str(SRC / "hybrid_shap.py"), "--family_dir", str(out),
+                       "--fold", str(fold_csv), "--images_dir", args.images_dir,
+                       "--task", args.task, "--device", args.device,
+                       "--seed", str(args.seed),
+                       "--background_size", str(args.shap_background_size),
+                       "--nsamples", str(args.shap_nsamples)]
+                if args.background_removed:
+                    cmd.append("--background_removed")
+                ok, _ = run_step(cmd, log, f"shap {fold_csv.stem}/{fam}")
+                if ok:
+                    grava_stamp(out / "shap" / "params.json", p)
+                else:
+                    falhas.append(f"shap {fold_csv.stem}/{fam}")
+
+    # --- 5. agregacao -------------------------------------------------
+    log.info("5/5 agregacao")
     cmd = [py, str(SRC / "hybrid_aggregate.py"), "--results_dir", str(res),
            "--task", args.task, "--folds"] + [f.stem for f in todos]
     if args.classical_results:

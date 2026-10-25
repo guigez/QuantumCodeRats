@@ -2,10 +2,11 @@
 AGREGACAO: HIBRIDOS x CLASSICO, ANIMAL A ANIMAL
 ===============================================
 
-Junta os bracos deste repositorio com os do classico (por padrao a cabeca
-linear e a floresta da ResNet50) e roda as MESMAS funcoes do aggregate.py
-classico: metricas por fold, tabela pareada por animal, teste de sinal com
-piso do p, resumo e comparacao entre sementes.
+Junta os bracos deste repositorio — inclusive C0 e C-RF, treinados aqui pela
+familia c0_rf — e, opcionalmente (--classical_results), os de uma pasta de
+resultados do classico. Roda as MESMAS funcoes do aggregate.py classico:
+metricas por fold, tabela pareada por animal, teste de sinal com piso do p,
+resumo e comparacao entre sementes.
 
 Acrescenta o que a pergunta "a hibrida generaliza melhor para um animal
 novo?" exige e o classico nao calculava por braco:
@@ -15,6 +16,8 @@ novo?" exige e o classico nao calculava por braco:
                            classe), adjacencia dos erros, revocacao da classe
                            mais intensa
   decision.csv             o criterio fixado antes de rodar (ver abaixo)
+  shap_summary.csv         enriquecimento de atribuicao E por braco, com acerto
+                           e erro separados (shap_by_frame.csv: por quadro)
 
 CRITERIO DE DECISAO
 -------------------
@@ -31,8 +34,7 @@ Sem replicas por semente o criterio (2) fica indeterminado. Nenhum p-valor
 entra na decisao: com 4 animais o piso do teste de sinal e 0,125.
 
 Uso:
-    python src/hybrid_aggregate.py --results_dir resultados_q/binary \\
-        --classical_results ../Classical/main_results/binary --task binary
+    python src/hybrid_aggregate.py --results_dir resultados/binary --task binary
 """
 
 from __future__ import annotations
@@ -55,7 +57,8 @@ from manifest import TASKS, class_names_for
 
 LINEAR_SUFFIX = "_linear_head"
 DEFAULT_CLASSICAL_ARMS = ("resnet50_rf_linear_head", "resnet50_rf")
-REFERENCE_ARMS = ("c1_bottleneck", "c1_ordinal", "c0_linear", "resnet50_rf_linear_head")
+REFERENCE_ARMS = ("c1_bottleneck", "c1_ordinal", "c0_rf_linear_head", "c0_rf",
+                  "resnet50_rf_linear_head", "resnet50_rf")
 COLLAPSE_THRESHOLD = 0.8
 
 
@@ -122,8 +125,8 @@ def _val_score(fam_dir: Path, seed, linear: bool, metric: str) -> float:
                 return float(df[col].iloc[0])
         return float("nan")
     f = fam_dir / "seeds" / "seeds_summary.csv"
-    if linear or not f.exists():
-        return float("nan")                       # o classico nao grava a validacao da cabeca linear por semente
+    if not f.exists():
+        return float("nan")
     df = pd.read_csv(f)
     linha = df[df.seed == seed]
     return float(linha[col].iloc[0]) if col in df.columns and len(linha) else float("nan")
@@ -169,13 +172,56 @@ def diagnostics_summary(diag: pd.DataFrame) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------
+# SHAP
+# --------------------------------------------------------------------------
+def shap_summary(root: Path, folds: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Junta fold_*/<familia>/shap/shap_background_ratio.csv e resume por braco.
+
+    E = 1 e atribuicao indistinguivel da uniforme. Com imagens com esteira a
+    mascara e por limiar (regiao quente), entao E e limite superior da
+    atencao ao animal. Acerto e erro vao separados: no classico os dois
+    tinham o mesmo E, isto e, a localizacao nao distinguia acerto de erro.
+    """
+    blocos = []
+    for fold in folds:
+        for f in sorted((root / fold).glob("*/shap/shap_background_ratio.csv")):
+            df = pd.read_csv(f)
+            df.insert(0, "fold", fold)
+            if "arm" not in df.columns:
+                df.insert(1, "arm", f.parent.parent.name)
+            blocos.append(df)
+    if not blocos:
+        return pd.DataFrame(), pd.DataFrame()
+    todos = pd.concat(blocos, ignore_index=True)
+    todos["enrichment"] = todos["enrichment"].replace([np.inf, -np.inf], np.nan)
+    g = todos.groupby("arm")
+    resumo = pd.DataFrame({
+        "n_frames": g.size(),
+        "enrichment_mean": g["enrichment"].mean(),
+        "enrichment_median": g["enrichment"].median(),
+        "frac_enrichment_above_1_3": g["enrichment"].apply(lambda e: float((e > 1.3).mean())),
+        "frac_enrichment_below_0_8": g["enrichment"].apply(lambda e: float((e < 0.8).mean())),
+        "background_ratio_mean": g["background_ratio"].mean(),
+        "animal_area_frac_mean": g["animal_area_frac"].mean(),
+    })
+    if "tipo" in todos.columns:
+        por_tipo = todos.pivot_table(index="arm", columns="tipo", values="enrichment", aggfunc="mean")
+        for tipo in por_tipo.columns:
+            resumo[f"enrichment_{tipo}"] = por_tipo[tipo]
+    if "mask" in todos.columns:
+        resumo["mask"] = g["mask"].agg(lambda m: ",".join(sorted(set(m.dropna()))))
+    return todos, resumo.reset_index()
+
+
+# --------------------------------------------------------------------------
 # Criterio de decisao
 # --------------------------------------------------------------------------
 def default_pairs(arms: list[str]) -> list[tuple[str, str]]:
     """Cada hibrido (nome comecando com 'h') contra cada referencia presente.
 
     Hibridos ordinais se comparam com c1_ordinal; os demais com c1_bottleneck.
-    Ambos se comparam com a cabeca linear (classica e/ou refeita aqui).
+    Todos se comparam com C0 e C-RF (c0_rf_linear_head, c0_rf) e, se lidos
+    de --classical_results, com os bracos do classico.
     """
     pares = []
     for h in sorted(a for a in arms if a.startswith("h")):
@@ -304,6 +350,11 @@ def main() -> int:
     dec = decision_table(base_decisao, diag, pares, principal)
     dec.to_csv(out / "decision.csv", index=False)
 
+    shap_frames, shap_resumo = shap_summary(res, folds)
+    if not shap_frames.empty:
+        shap_frames.to_csv(out / "shap_by_frame.csv", index=False)
+        shap_resumo.to_csv(out / "shap_summary.csv", index=False)
+
     n_animais = por_sujeito.subject_id.nunique()
     print("=" * 78)
     print(f"AGREGACAO HIBRIDA — tarefa={args.task}  {len(folds)} folds, {n_animais} animais, "
@@ -318,6 +369,13 @@ def main() -> int:
                    "seed_noise", "c1_all_subjects", "c2_above_2x_noise",
                    "c3_no_extra_failure", "verdict"]]
               .to_string(index=False, float_format=lambda x: f"{x:.4f}"))
+    if not shap_resumo.empty:
+        print()
+        cols = [c for c in ("arm", "n_frames", "enrichment_mean", "enrichment_acerto",
+                            "enrichment_erro", "frac_enrichment_above_1_3", "mask")
+                if c in shap_resumo.columns]
+        print("SHAP — enriquecimento E por braco (E > 1: atencao preferencial a regiao quente)")
+        print(shap_resumo[cols].to_string(index=False, float_format=lambda x: f"{x:.3f}"))
     print(f"\npiso do p com {n_animais} animais: {p_floor(n_animais):.4f} "
           "(a decisao nao usa p-valor)")
     print(f"[ok] tabelas em {out}/")

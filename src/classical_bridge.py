@@ -15,8 +15,8 @@ nome que colida com os de la — por isso todos comecam com `hybrid_`.
 Onde procurar o repositorio classico, nesta ordem:
 
   1. variavel de ambiente CLASSICAL_CODE;
-  2. Bernini/Classical/classicalCodeRats    (estrutura do servidor);
-  3. Bernini/Classical/Code                 (estrutura local);
+  2. Bernini/Classical/classicalCodeRats ou ClassicalCodeRats;
+  3. Bernini/Classical/Code                 (estrutura local antiga);
   4. external/classicalCodeRats             (submodulo git, se existir).
 
 O orquestrador resolve o caminho uma vez e o repassa aos subprocessos pela
@@ -36,7 +36,7 @@ ENV_VAR = "CLASSICAL_CODE"
 # Modulos classicos usados aqui. Se algum estiver corrompido ou ausente, falha
 # na hora com mensagem clara, em vez de um SyntaxError no meio de um treino.
 REQUIRED = ("common", "dataset", "manifest", "splits", "metrics", "aggregate",
-            "models", "train")
+            "models", "train", "explain_shap")
 
 
 def _candidates() -> list[Path]:
@@ -45,7 +45,9 @@ def _candidates() -> list[Path]:
     out = []
     if os.environ.get(ENV_VAR):
         out.append(Path(os.environ[ENV_VAR]))
+    # As duas grafias: o servidor e Linux, onde a caixa do nome importa.
     out += [bernini / "Classical" / "classicalCodeRats",
+            bernini / "Classical" / "ClassicalCodeRats",
             bernini / "Classical" / "Code",
             ROOT / "external" / "classicalCodeRats"]
     return out

@@ -7,7 +7,7 @@ Todas as familias compartilham o backbone do classico — a MESMA classe
 congelado exceto layer4. O que muda entre familias e so a cabeca sobre o
 vetor de 2048 dimensoes do avgpool:
 
-  head="linear"      2048 -> k                                  (C0 refeito)
+  head="linear"      2048 -> k                       (C0; com rf_head, tambem C-RF)
   head="bottleneck"  2048 -> n -> MLP pequeno -> k              (C1, controle)
   head="vqc"         2048 -> n -> circuito variacional -> k     (H1)
   head="reupload"    2048 -> n -> circuito com re-uploading -> k (H2)

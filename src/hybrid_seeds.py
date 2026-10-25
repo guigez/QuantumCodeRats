@@ -9,8 +9,8 @@ inicializacao — e no circuito a inicializacao pesa: os angulos comecam
 uniformes em [0, 2pi).
 
 Saida em <family_dir>/seeds/seed_<s>/, no formato que o aggregate.py
-classico le. model.pt e apagado ao fim de cada replica, a menos de
---keep_models.
+classico le. model.pt (e rf_head.joblib, na familia c0_rf) e apagado ao fim
+de cada replica, a menos de --keep_models.
 
 Uso:
     python src/hybrid_seeds.py --family_dir resultados/binary/fold_00/h1_vqc \\
@@ -104,9 +104,11 @@ def main() -> int:
 
         if not args.keep_models:
             (out / "model.pt").unlink(missing_ok=True)
+            (out / "rf_head.joblib").unlink(missing_ok=True)
         stamp.write_text(json.dumps(params, indent=2))
         resumos.append({"seed": s, "best_epoch": r.get("best_epoch"),
                         "val_f1_macro": r.get("val_f1_macro"),
+                        "linear_val_f1_macro": r.get("linear_val_f1_macro"),
                         "test_f1_macro": m.get("f1_macro"),
                         "test_balanced_accuracy": m.get("balanced_accuracy")})
         print(f"    best_epoch={r.get('best_epoch')}  val_f1={r.get('val_f1_macro', float('nan')):.4f}"

@@ -41,6 +41,29 @@ def test_candidato_e_teste(synthetic_fold, tmp_path, head, output):
     assert (out / "metrics_test_by_subject.csv").exists()
 
 
+def test_c0_rf_gera_dois_bracos(synthetic_fold, tmp_path):
+    fold_csv, img_dir, nomes = synthetic_fold
+    cfg = {**CFG, "head": "linear", "output": "softmax", "rf_head": True,
+           "rf_n_estimators": 10, "rf_min_samples_leaf": 1}
+    out = tmp_path / "c0_rf"
+    r = run_candidate(fold_csv, img_dir, cfg, out, torch.device("cpu"), len(nomes), nomes)
+    assert "linear_val_f1_macro" in r and "val_f1_macro" in r
+    assert (out / "rf_head.joblib").exists()
+    assert (out / "predictions_val_linear_head.csv").exists()
+
+    evaluate_on_test(out, fold_csv, img_dir, cfg, torch.device("cpu"), len(nomes), nomes, out)
+    for prefixo in ("test", "test_linear_head"):
+        assert (out / f"metrics_{prefixo}.csv").exists()
+        assert (out / f"metrics_{prefixo}_by_subject.csv").exists()
+
+
+def test_rf_exige_cabeca_linear(synthetic_fold, tmp_path):
+    fold_csv, img_dir, nomes = synthetic_fold
+    cfg = {**CFG, "head": "vqc", "rf_head": True}
+    with pytest.raises(ValueError):
+        run_candidate(fold_csv, img_dir, cfg, tmp_path / "x", torch.device("cpu"), 2, nomes)
+
+
 def test_mesma_semente_mesmo_resultado(synthetic_fold, tmp_path):
     fold_csv, img_dir, nomes = synthetic_fold
     cfg = {**CFG, "head": "vqc", "output": "softmax", "epochs": 1}
