@@ -40,8 +40,51 @@ Diferenças de treino entre as famílias, todas registradas em
 - `train_log.csv` grava a norma média do gradiente do circuito por época, para
   diagnosticar barren plateau.
 
-Cada família tem uma única configuração, fixada antes de rodar, sem grid. A
-variação de treino é medida pelas réplicas por semente.
+### Grid
+
+| famílias | grid | candidatos por dobra |
+|---|---|---|
+| `h1_vqc`, `h3_vqc_ordinal` | `n_qubits` {4, 6, 8} × `n_layers` {1, 2, 4} × `quantum_learning_rate` {1e-3, 1e-2} × `ansatz` {strongly, basic} | 36 |
+| `h2_reupload` | `n_qubits` {4, 6, 8} × `n_layers` {1, 2, 4} × `quantum_learning_rate` {1e-3, 1e-2} | 18 |
+| `c1_bottleneck`, `c1_ordinal` | o grid do H1, espelhado: `n_qubits` × `n_layers` × `core_learning_rate` {1e-3, 1e-2} × `c1_match` {strongly, basic} | 36 |
+| `c0_rf` | nenhum (configuração vencedora do clássico, fixa) | 1 |
+
+O vencedor de cada dobra é escolhido pelo F1 macro da validação, e o teste é
+avaliado uma vez, só nele. O H2 não tem `ansatz` no grid: ele usa sempre uma
+camada StronglyEntangling por reinserção, e o parâmetro seria ignorado.
+
+O grid é espelhado no C1 para que as duas cabeças tenham a mesma busca:
+
+- `n_qubits` vira a largura do gargalo do C1;
+- `core_learning_rate` é a taxa do MLP, no papel da `quantum_learning_rate`
+  (o circuito fica sem weight decay; o MLP mantém o da cabeça);
+- `n_layers` e `c1_match` definem o alvo do casamento de parâmetros: 3nL
+  (strongly) ou nL (basic).
+
+Com alvos pequenos o MLP não consegue ser tão pequeno quanto o circuito: com
+h = 1 ele já tem 2n + 1 + n parâmetros (13 com n = 4, 25 com n = 8), contra
+nL do circuito basic (4 a 32).
+
+| n × L | strongly (H1/H3) | basic (H1/H3) | H2 | MLP casado com strongly | MLP casado com basic |
+|---|---|---|---|---|---|
+| 4 × 1 | 12 | 4 | 16 | 13 (h = 1) | 13 (h = 1) |
+| 4 × 2 | 24 | 8 | 32 | 22 (h = 2) | 13 (h = 1) |
+| 4 × 4 | 48 | 16 | 64 | 49 (h = 5) | 13 (h = 1) |
+| 6 × 1 | 18 | 6 | 24 | 19 (h = 1) | 19 (h = 1) |
+| 6 × 2 | 36 | 12 | 48 | 32 (h = 2) | 19 (h = 1) |
+| 6 × 4 | 72 | 24 | 96 | 71 (h = 5) | 19 (h = 1) |
+| 8 × 1 | 24 | 8 | 32 | 25 (h = 1) | 25 (h = 1) |
+| 8 × 2 | 48 | 16 | 64 | 42 (h = 2) | 25 (h = 1) |
+| 8 × 4 | 96 | 32 | 128 | 93 (h = 5) | 25 (h = 1) |
+
+As réplicas por semente e o SHAP usam a configuração vencedora de cada dobra.
+`grid_summary.csv` guarda a validação de todos os candidatos, e o `model.pt`
+dos que perderam é apagado. Os demais hiperparâmetros são fixos.
+
+Um grid de 36 candidatos leva mais de um dia por dobra. Se a execução cair no
+meio, rodar de novo retoma de onde parou: cada candidato concluído grava
+`net_XXX/candidate_done.json` e não é treinado outra vez enquanto a
+configuração e a dobra forem as mesmas. `EXTRA_ARGS="--force"` retreina tudo.
 
 ## Estrutura
 
@@ -88,6 +131,29 @@ pip install -r requirements.txt
 
 ## Execução
 
+### Antes da execução completa
+
+A execução completa leva semanas. Antes dela, com o ambiente ativado e a
+partir da raiz deste repositório:
+
+1. Rode os testes (minutos, CPU, imagens sintéticas):
+   ```bash
+   python -m pytest tests -q
+   ```
+2. Rode um piloto com dados reais numa pasta separada: H1, binário, só o
+   fold_00, só o primeiro candidato do grid (`--limit_candidates 1`) e sem
+   réplicas. Ele percorre as cinco etapas (dobras, treino, SHAP, agregação) na
+   GPU em cerca de uma hora, sem sujar `main_results`:
+   ```bash
+   RESULTS="$(pwd)/../piloto" TASKS="binary" FAMILIES="h1_vqc" SEEDS="" EXTRA_ARGS="--only-folds 0 --limit_candidates 1" nohup bash scripts/run_server.sh > /dev/null 2>&1 &
+   ```
+   Confira em `../piloto/run_server.log` que terminou sem falhas, em
+   `../piloto/binary/fold_00/h1_vqc/net_00*/train_log.csv` quanto tempo leva
+   cada época e se `quantum_grad_norm` não é zero, e em
+   `../piloto/binary/fold_00/h1_vqc/shap/` que o painel saiu.
+
+### Execução completa
+
 No servidor, com `Bernini/Quantum/QuantumCodeRats/` (este repositório), o
 clássico em `Bernini/Classical/classicalCodeRats/` e os dados em
 `Bernini/_dataset/`:
@@ -105,10 +171,12 @@ nada é lido de outra pasta de resultados. Para refazer tudo numa pasta que já
 tem resultados, use `EXTRA_ARGS="--force"` ou aponte `RESULTS` para uma pasta
 nova.
 
-Custo: cada treino da ResNet50 levou cerca de 45 min no servidor, e cada família
-faz 4 dobras × (vencedor + 5 sementes) = 24 treinos, cerca de 18 h por cenário.
-São 4 famílias no binário (H3 e C1-ord são puladas) e 6 nos outros três, ou
-22 × 18 h ≈ 16 dias no total. Para um subconjunto:
+Custo: cada treino da ResNet50 levou cerca de 45 min no servidor. Por dobra, o
+binário treina 90 candidatos (C1 36, H1 36, H2 18) e cada um dos outros três
+cenários 162 (mais H3 36 e C1-ord 36). Nas 4 dobras são 2.304 candidatos, mais
+360 réplicas por semente (18 combinações de família × cenário × 4 dobras × 5) e
+96 treinos do `c0_rf`: 2.760 treinos, cerca de **86 dias** de GPU, mais o custo
+do circuito. Para um subconjunto:
 
 ```bash
 TASKS="binary multiclass" FAMILIES="c0_rf c1_bottleneck h1_vqc" nohup bash scripts/run_server.sh > /dev/null 2>&1 &

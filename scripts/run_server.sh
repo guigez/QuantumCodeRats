@@ -97,6 +97,8 @@ if [ "$WITH_BACKGROUND" != "1" ]; then bg_arg=(--background_removed); fi
 classical_arg=()
 if [ -n "$CLASSICAL_RESULTS" ]; then classical_arg=(--classical_results "$CLASSICAL_RESULTS"); fi
 
+# ${arr[@]+"${arr[@]}"}: com set -u, bash anterior ao 4.4 trata array vazio como
+# variavel nao definida e aborta. classical_arg e vazio por padrao.
 falhas=()
 for task in $TASKS; do
     echo
@@ -106,7 +108,8 @@ for task in $TASKS; do
             --fixed_test_subjects $FIXED_TEST \
             --images_dir "$DATASET/images" --metadata "$DATASET/metadata-1.csv" \
             --results_dir "$RESULTS" --device "$DEVICE" \
-            "${classical_arg[@]}" "${seeds_arg[@]}" "${bg_arg[@]}" $EXTRA_ARGS; then
+            ${classical_arg[@]+"${classical_arg[@]}"} ${seeds_arg[@]+"${seeds_arg[@]}"} \
+            ${bg_arg[@]+"${bg_arg[@]}"} $EXTRA_ARGS; then
         falhas+=("$task")
     fi
 done

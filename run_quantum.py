@@ -147,6 +147,8 @@ def main() -> int:
                          "imagens sao completas e a mascara e o limiar R-B do classico.")
     ap.add_argument("--shap_background_size", type=int, default=32)
     ap.add_argument("--shap_nsamples", type=int, default=200)
+    ap.add_argument("--limit_candidates", type=int, default=None,
+                    help="So para piloto: usa os N primeiros candidatos de cada grid.")
     ap.add_argument("--only-folds", type=int, nargs="*", default=None)
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
@@ -187,18 +189,23 @@ def main() -> int:
             out = res / fold_csv.stem / fam
             grid_json = CONFIGS / f"grid_{fam}.json"
             p = {"fold_sha": file_sha(fold_csv), "grid_sha": file_sha(grid_json),
-                 "seed": args.seed, "task": args.task}
+                 "seed": args.seed, "task": args.task,
+                 "limit_candidates": args.limit_candidates}
             if not precisa_rodar(out / "params.json", out / "best_summary.csv", p,
                                  args.force, log, f"{fold_csv.stem}/{fam}"):
                 log.info(f"  {fold_csv.stem}/{fam} ja concluido, pulando")
                 continue
             for velho in ("best_summary.csv", "best_selection.json", "params.json"):
                 (out / velho).unlink(missing_ok=True)
-            ok, _ = run_step([py, str(SRC / "hybrid_grid.py"), "--fold", str(fold_csv),
-                              "--grid", str(grid_json), "--images_dir", args.images_dir,
-                              "--out_dir", str(out), "--device", args.device,
-                              "--task", args.task, "--seed", str(args.seed)],
-                             log, f"grid {fold_csv.stem}/{fam}")
+            cmd = [py, str(SRC / "hybrid_grid.py"), "--fold", str(fold_csv),
+                   "--grid", str(grid_json), "--images_dir", args.images_dir,
+                   "--out_dir", str(out), "--device", args.device,
+                   "--task", args.task, "--seed", str(args.seed)]
+            if args.limit_candidates:
+                cmd += ["--limit_candidates", str(args.limit_candidates)]
+            if args.force:
+                cmd.append("--force")
+            ok, _ = run_step(cmd, log, f"grid {fold_csv.stem}/{fam}")
             if ok:
                 grava_stamp(out / "params.json", p)
             else:

@@ -24,9 +24,14 @@
     "num_workers": 4,
     "selection_metric": "f1_macro"
   },
-  "grid": {},
+  "grid": {
+    "n_qubits": [4, 6, 8],
+    "n_layers": [1, 2, 4],
+    "core_learning_rate": [0.001, 0.01],
+    "c1_match": ["strongly", "basic"]
+  },
   "selection": {
     "metric": "val_f1_macro"
   },
-  "_nota_grid": "Configuracao unica, fixada antes de rodar: backbone e treino identicos ao resnet50_rf classico (lr 1e-4, wd 1e-4, paciencias 15/6, augment ligado, que foi o unico hiperparametro com sinal na sensibilidade classica). n=8 qubits e L=4 camadas pela faixa dominante na revisao. Sem grid para nao selecionar ruido: a variacao entre sementes e medida pelas replicas. C1: mesmo gargalo 2048->8 e mesmo squash do H1; nucleo 8->h->8 com tanh e h casado com os 3nL = 96 parametros do H1 (h=5, 93 parametros)."
+  "_nota_grid": "Grid espelhado do H1: n_qubits {4, 6, 8} (largura do gargalo) x n_layers {1, 2, 4} x core_learning_rate {1e-3, 1e-2} (taxa do MLP, no papel da quantum_learning_rate) x c1_match {strongly, basic} (o MLP casa com 3nL ou nL parametros, no papel do ansatz): 36 candidatos. Com alvos pequenos o MLP nao consegue ser tao pequeno quanto o circuito: h minimo 1 da 2n+1+n parametros (13 com n=4, 25 com n=8)."
 }

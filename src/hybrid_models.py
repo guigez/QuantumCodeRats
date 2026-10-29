@@ -291,13 +291,21 @@ class HybridResNet(nn.Module):
         return F.cross_entropy(out, y, weight=class_weights)
 
     def parameter_groups(self) -> dict[str, list[nn.Parameter]]:
-        """backbone (layer4), cabeca classica e circuito, para taxas distintas."""
-        quantum = list(self.core.parameters()) if isinstance(self.core, QuantumCore) else []
-        ids = {id(p) for p in quantum}
+        """Grupos com taxa propria: backbone (layer4), cabeca (compressao e
+        saida), nucleo quantico e nucleo classico (MLP do C1).
+
+        Os dois nucleos ocupam o mesmo lugar e recebem a mesma taxa
+        (core_learning_rate), o que deixa o grid da taxa espelhavel no C1.
+        """
+        nucleo = list(self.core.parameters()) if self.core is not None else []
+        quantum = nucleo if isinstance(self.core, QuantumCore) else []
+        classical_core = [] if quantum else nucleo
+        ids = {id(p) for p in nucleo}
         backbone = [p for p in self.encoder.parameters() if p.requires_grad]
         head = [p for n, p in self.named_parameters()
                 if not n.startswith("encoder.") and id(p) not in ids and p.requires_grad]
-        return {"backbone": backbone, "head": head, "quantum": quantum}
+        return {"backbone": backbone, "head": head, "quantum": quantum,
+                "classical_core": classical_core}
 
     def describe(self) -> dict:
         """Contagens de parametros, gravadas em config_used.json."""
@@ -308,7 +316,8 @@ class HybridResNet(nn.Module):
             "params_core": count_parameters(self.core) if self.core is not None else 0,
             "params_core_is_quantum": isinstance(self.core, QuantumCore),
             "params_output": count_parameters(self.out),
-            "params_head_total": sum(p.numel() for p in g["head"] + g["quantum"]),
+            "params_head_total": sum(p.numel() for p in
+                                     g["head"] + g["quantum"] + g["classical_core"]),
         }
 
 

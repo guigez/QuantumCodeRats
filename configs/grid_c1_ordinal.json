@@ -24,11 +24,16 @@
     "num_workers": 4,
     "selection_metric": "f1_macro"
   },
-  "grid": {},
+  "grid": {
+    "n_qubits": [4, 6, 8],
+    "n_layers": [1, 2, 4],
+    "core_learning_rate": [0.001, 0.01],
+    "c1_match": ["strongly", "basic"]
+  },
   "selection": {
     "metric": "val_f1_macro"
   },
   "skip_tasks": ["binary"],
   "_nota_skip": "com duas classes a saida ordinal e uma regressao logistica, equivalente a softmax",
-  "_nota_grid": "Configuracao unica, fixada antes de rodar: backbone e treino identicos ao resnet50_rf classico (lr 1e-4, wd 1e-4, paciencias 15/6, augment ligado, que foi o unico hiperparametro com sinal na sensibilidade classica). n=8 qubits e L=4 camadas pela faixa dominante na revisao. Sem grid para nao selecionar ruido: a variacao entre sementes e medida pelas replicas. Controle classico do H3."
+  "_nota_grid": "Grid espelhado do H3, igual ao do C1: n_qubits {4, 6, 8} x n_layers {1, 2, 4} x core_learning_rate {1e-3, 1e-2} x c1_match {strongly, basic}: 36 candidatos. Controle classico do H3."
 }

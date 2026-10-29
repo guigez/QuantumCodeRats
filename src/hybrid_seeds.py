@@ -30,6 +30,7 @@ import hashlib
 import json
 import shutil
 import sys
+import traceback
 from pathlib import Path
 
 import pandas as pd
@@ -99,6 +100,7 @@ def main() -> int:
                                  n_classes, class_names, out)
         except Exception as e:
             print(f"    ERRO: {e!r}")
+            traceback.print_exc(file=sys.stdout)
             falhas.append(s)
             continue
 

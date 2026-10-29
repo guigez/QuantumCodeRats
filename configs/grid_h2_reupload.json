@@ -26,9 +26,13 @@
     "num_workers": 4,
     "selection_metric": "f1_macro"
   },
-  "grid": {},
+  "grid": {
+    "n_qubits": [4, 6, 8],
+    "n_layers": [1, 2, 4],
+    "quantum_learning_rate": [0.001, 0.01]
+  },
   "selection": {
     "metric": "val_f1_macro"
   },
-  "_nota_grid": "Configuracao unica, fixada antes de rodar: backbone e treino identicos ao resnet50_rf classico (lr 1e-4, wd 1e-4, paciencias 15/6, augment ligado, que foi o unico hiperparametro com sinal na sensibilidade classica). n=8 qubits e L=4 camadas pela faixa dominante na revisao. Sem grid para nao selecionar ruido: a variacao entre sementes e medida pelas replicas. H2 tem 4nL = 128 parametros no circuito (Rot + escalas)."
+  "_nota_grid": "Grid de busca da cabeca quantica: n_qubits {4, 6, 8} x n_layers {1, 2, 4} x quantum_learning_rate {1e-3, 1e-2}: 18 candidatos. Sem ansatz no grid: o H2 usa sempre StronglyEntangling por camada, e o parametro seria ignorado (candidatos duplicados). O circuito tem 4nL parametros (Rot + escalas), escolhido pelo F1 macro da validacao em cada dobra. O C1 e o C1-ord recebem o grid espelhado (largura do gargalo, alvo do casamento de parametros, mesma taxa no nucleo). Demais hiperparametros fixos: backbone e treino do resnet50_rf classico (lr 1e-4 na layer4, wd 1e-4, paciencias 15/6, augment ligado), compressao e saida a 1e-3."
 }

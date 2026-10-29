@@ -7,14 +7,15 @@ pesos de classe, mesma metrica de selecao, mesmo early stopping e
 ReduceLROnPlateau na validacao — com tres diferencas, todas por necessidade:
 
   1. Perda pluggable: entropia cruzada ou ordinal (H3 / C1-ord).
-  2. Tres grupos de parametros com taxa propria:
-       backbone (layer4)   learning_rate        (1e-4, a do classico)
-       cabeca classica     head_learning_rate
-       circuito            quantum_learning_rate (padrao = head_learning_rate)
+  2. Grupos de parametros com taxa propria:
+       backbone (layer4)        learning_rate       (1e-4, a do classico)
+       compressao e saida       head_learning_rate
+       nucleo (circuito ou MLP) core_learning_rate, ou quantum_learning_rate
+                                nas familias quanticas (padrao = head_learning_rate)
      O circuito NAO recebe weight decay: os parametros sao angulos
-     periodicos, e puxa-los para zero e um vies sem sentido fisico.
-     C1 e H1 usam a mesma head_learning_rate, entao a comparacao entre eles
-     nao e confundida pela taxa.
+     periodicos, e puxa-los para zero e um vies sem sentido fisico. O MLP do
+     C1 recebe. C1 e H1 tem o mesmo grid de taxa do nucleo, entao a
+     comparacao entre eles nao e confundida pela taxa.
   3. Diagnostico de barren plateau: a norma media do gradiente dos
      parametros do circuito vai para train_log.csv a cada epoca. Gradiente
      que encolhe para ~0 com o treino ainda longe da convergencia e o
@@ -124,16 +125,23 @@ def infer(model, loader, device):
 
 
 def build_optimizer(model, config):
+    """Adam com quatro grupos. A taxa do nucleo vem de core_learning_rate ou,
+    nas familias quanticas, de quantum_learning_rate (mesmo papel); sem
+    nenhuma das duas, e a da cabeca."""
     lr = float(config.get("learning_rate", 1e-4))
     lr_head = float(config.get("head_learning_rate", 1e-3))
-    lr_q = float(config.get("quantum_learning_rate", lr_head))
+    lr_core = float(config.get("core_learning_rate",
+                               config.get("quantum_learning_rate", lr_head)))
     wd = float(config.get("weight_decay", 1e-4))
     grupos = model.parameter_groups()
-    param_groups = [{"params": grupos["backbone"], "lr": lr, "weight_decay": wd, "name": "backbone"},
-                    {"params": grupos["head"], "lr": lr_head, "weight_decay": wd, "name": "head"}]
-    if grupos["quantum"]:
-        param_groups.append({"params": grupos["quantum"], "lr": lr_q,
-                             "weight_decay": 0.0, "name": "quantum"})
+    param_groups = [
+        {"params": grupos["backbone"], "lr": lr, "weight_decay": wd, "name": "backbone"},
+        {"params": grupos["head"], "lr": lr_head, "weight_decay": wd, "name": "head"},
+        # Angulos sao periodicos: puxa-los para zero e um vies sem sentido.
+        {"params": grupos["quantum"], "lr": lr_core, "weight_decay": 0.0, "name": "quantum"},
+        {"params": grupos["classical_core"], "lr": lr_core, "weight_decay": wd,
+         "name": "classical_core"},
+    ]
     return torch.optim.Adam([g for g in param_groups if g["params"]])
 
 

@@ -40,6 +40,25 @@ def test_contagem_casada_c1_h1():
     assert h1.describe()["params_compress"] == c1.describe()["params_compress"] == 2048 * 8 + 8
 
 
+def test_contagem_ansatz_basic_e_casamento():
+    h1 = HybridResNet(4, head="vqc", ansatz="basic", pretrained=False, n_qubits=4, n_layers=2)
+    c1 = HybridResNet(4, head="bottleneck", c1_match="basic", pretrained=False,
+                      n_qubits=4, n_layers=2)
+    assert h1.describe()["params_core"] == 8 == quantum_param_count("basic", 4, 2)
+    assert c1.describe()["params_core"] == 13                 # h minimo 1: 2*4 + 1 + 4
+
+
+@pytest.mark.parametrize("head,chave,grupo", [("vqc", "quantum_learning_rate", "quantum"),
+                                             ("bottleneck", "core_learning_rate", "classical_core")])
+def test_taxa_do_nucleo_espelhada(head, chave, grupo):
+    from hybrid_train import build_optimizer
+    m = make(head)
+    taxas = {g["name"]: (g["lr"], g["weight_decay"]) for g in
+             build_optimizer(m, {chave: 0.01, "head_learning_rate": 0.001}).param_groups}
+    assert taxas[grupo][0] == 0.01 and taxas["head"][0] == 0.001
+    assert taxas[grupo][1] == (0.0 if grupo == "quantum" else 1e-4)
+
+
 def test_grupos_de_parametros_disjuntos_e_completos():
     m = make("vqc")
     g = m.parameter_groups()

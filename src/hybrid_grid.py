@@ -9,7 +9,9 @@ recebem a mesma semente.
 
 Saida no mesmo formato do classico (best_summary.csv, best_selection.json,
 metrics_test*.csv, predictions_test.csv, ...), o que deixa o aggregate.py
-classico ler as familias hibridas sem adaptacao.
+classico ler as familias hibridas sem adaptacao. grid_summary.csv guarda a
+validacao de todos os candidatos; o model.pt dos que perderam e apagado
+(--keep_all_models mantem).
 
 Uso:
     python src/hybrid_grid.py --fold splits/fold_00.csv \\
@@ -25,12 +27,16 @@ from common import resolve_device, silence_known_warnings
 silence_known_warnings()
 
 import argparse
+import gc
+import hashlib
 import itertools
 import json
 import sys
+import traceback
 from pathlib import Path
 
 import pandas as pd
+import torch
 
 from manifest import TASKS, class_names_for
 
@@ -61,6 +67,12 @@ def main() -> int:
     ap.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     ap.add_argument("--task", default="multiclass", choices=list(TASKS))
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--limit_candidates", type=int, default=None,
+                    help="Usa so os N primeiros candidatos do grid (piloto).")
+    ap.add_argument("--force", action="store_true",
+                    help="Retreina todos os candidatos, mesmo os ja concluidos.")
+    ap.add_argument("--keep_all_models", action="store_true",
+                    help="Mantem model.pt dos candidatos que perderam (por padrao sao apagados).")
     args = ap.parse_args()
 
     device = resolve_device(args.device)
@@ -71,25 +83,50 @@ def main() -> int:
     base, grid = cfg["base"], cfg.get("grid", {})
     metrica = cfg.get("selection", {}).get("metric", "val_f1_macro")
     candidatos = expand_grid(grid) or [{}]
+    if args.limit_candidates:
+        # So para piloto: corta o grid nos N primeiros candidatos.
+        candidatos = candidatos[:args.limit_candidates]
 
     out_dir = Path(args.out_dir); out_dir.mkdir(parents=True, exist_ok=True)
     print(f"[{out_dir.name}] dispositivo={device}  candidatos={len(candidatos)}  "
           f"selecao por {metrica}")
 
+    fold_sha = hashlib.sha1(Path(args.fold).read_bytes()).hexdigest()[:16]
     resumos = []
     for i, combo in enumerate(candidatos):
         c = {**base, **combo, "config_id": f"net_{i:03d}", "seed": args.seed}
         net_dir = out_dir / f"net_{i:03d}"
         print(f"  net_{i:03d}  {combo}")
+
+        # Retomada: um grid de 36 candidatos leva mais de um dia por dobra.
+        # Se o processo cair no meio, os candidatos ja concluidos (mesma
+        # config, mesmo fold, model.pt presente) nao sao treinados de novo.
+        marca = net_dir / "candidate_done.json"
+        params = {"config": c, "fold_sha": fold_sha}
+        if (not args.force and marca.exists() and (net_dir / "model.pt").exists()):
+            feito = json.loads(marca.read_text())
+            if feito.get("params") == json.loads(json.dumps(params, default=str)):
+                print("    ja concluido, reaproveitando")
+                resumos.append({"net_id": f"net_{i:03d}", **combo, **feito["result"],
+                                "status": "ok"})
+                pd.DataFrame(resumos).to_csv(out_dir / "grid_summary.csv", index=False)
+                continue
         try:
             r = run_candidate(args.fold, args.images_dir, c, net_dir, device,
                               n_classes, class_names)
+            marca.write_text(json.dumps({"params": params, "result": r}, indent=2, default=str))
             resumos.append({"net_id": f"net_{i:03d}", **combo, **r, "status": "ok"})
         except Exception as e:
             print(f"    ERRO: {e!r}")
+            traceback.print_exc(file=sys.stdout)       # vai para o log do orquestrador
             resumos.append({"net_id": f"net_{i:03d}", **combo, "status": "erro",
                             "error": repr(e), "net_dir": str(net_dir),
                             "cand_dir": str(net_dir)})
+        finally:
+            # 36 treinos no mesmo processo: devolve o cache da GPU entre eles.
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         pd.DataFrame(resumos).to_csv(out_dir / "grid_summary.csv", index=False)
 
     df = pd.DataFrame(resumos)
@@ -116,6 +153,15 @@ def main() -> int:
         {"best_config_id": melhor.net_id, "net_dir": str(net_dir),
          "cand_dir": str(net_dir), "selected_by": metrica}, indent=2))
     print(f"  teste: f1_macro={m_teste.get('f1_macro', float('nan')):.4f}")
+
+    # Pesos dos candidatos que perderam: ~90 MB cada, e nada mais os le
+    # (replicas e SHAP usam so o vencedor). Logs, config e predicoes de
+    # validacao ficam, para a analise do grid.
+    if not args.keep_all_models:
+        for outro in ok.net_dir:
+            if Path(outro) != net_dir:
+                (Path(outro) / "model.pt").unlink(missing_ok=True)
+                (Path(outro) / "rf_head.joblib").unlink(missing_ok=True)
     return 0
 
 
