@@ -78,3 +78,26 @@ def test_mesma_semente_mesmo_resultado(synthetic_fold, tmp_path):
 def test_grid_vazio_e_um_candidato():
     assert expand_grid({}) == [{}]
     assert len(expand_grid({"n_qubits": [4, 8], "augment": True})) == 2
+
+
+@pytest.mark.parametrize("familia,total,distintos", [
+    ("c1_bottleneck", 36, 18), ("c1_ordinal", 36, 18),      # h so pode ser 1, 2 ou 5
+    ("h1_vqc", 36, 36), ("h3_vqc_ordinal", 36, 36), ("h2_reupload", 18, 18),
+    ("c0_rf", 1, 1),
+])
+def test_assinatura_efetiva_remove_so_duplicatas(familia, total, distintos):
+    from pathlib import Path
+    from hybrid_grid import effective_signature, load_family_config
+    cfg = load_family_config(Path(__file__).resolve().parents[1] / "configs" / f"grid_{familia}.json")
+    cands = expand_grid(cfg["grid"]) or [{}]
+    assinaturas = {effective_signature({**cfg["base"], **c, "seed": 42}) for c in cands}
+    assert len(cands) == total and len(assinaturas) == distintos
+
+
+def test_assinatura_distingue_taxa_e_largura():
+    from hybrid_grid import effective_signature
+    base = {"head": "bottleneck", "n_qubits": 4, "n_layers": 1, "c1_match": "strongly"}
+    assert effective_signature(base) == effective_signature({**base, "c1_match": "basic"})
+    assert effective_signature(base) != effective_signature({**base, "core_learning_rate": 0.01})
+    assert effective_signature(base) != effective_signature({**base, "n_qubits": 6})
+    assert effective_signature(base) != effective_signature({**base, "n_layers": 4})

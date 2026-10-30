@@ -65,6 +65,16 @@ Com alvos pequenos o MLP não consegue ser tão pequeno quanto o circuito: com
 h = 1 ele já tem 2n + 1 + n parâmetros (13 com n = 4, 25 com n = 8), contra
 nL do circuito basic (4 a 32).
 
+Por isso, no C1 e no C1-ord, várias combinações do grid constroem a mesma
+rede: com `basic`, ou com 1 camada, o MLP sai sempre com h = 1. Para cada n e
+taxa só existem 3 redes (h = 1, 2 ou 5), ou seja, 18 redes distintas em 36
+candidatos. Com a mesma semente e treino determinístico, retreiná-las
+reproduziria o mesmo resultado. O `hybrid_grid.py` calcula a rede efetiva de
+cada candidato (`effective_signature`) e treina cada uma só uma vez; as
+repetições entram no `grid_summary.csv` com `status = duplicado`,
+`duplicate_of` e o resultado do original, e ficam fora da seleção. No H1, H2 e
+H3 não há repetições.
+
 | n × L | strongly (H1/H3) | basic (H1/H3) | H2 | MLP casado com strongly | MLP casado com basic |
 |---|---|---|---|---|---|
 | 4 × 1 | 12 | 4 | 16 | 13 (h = 1) | 13 (h = 1) |
@@ -171,12 +181,14 @@ nada é lido de outra pasta de resultados. Para refazer tudo numa pasta que já
 tem resultados, use `EXTRA_ARGS="--force"` ou aponte `RESULTS` para uma pasta
 nova.
 
-Custo: cada treino da ResNet50 levou cerca de 45 min no servidor. Por dobra, o
-binário treina 90 candidatos (C1 36, H1 36, H2 18) e cada um dos outros três
-cenários 162 (mais H3 36 e C1-ord 36). Nas 4 dobras são 2.304 candidatos, mais
-360 réplicas por semente (18 combinações de família × cenário × 4 dobras × 5) e
-96 treinos do `c0_rf`: 2.760 treinos, cerca de **86 dias** de GPU, mais o custo
-do circuito. Para um subconjunto:
+Custo: na execução de outubro de 2026, cada época levou ~2 min (c0_rf e C1) a
+~2 min 17 s (H1 pequeno), e cada treino, com o early stopping, ~51 min em
+média (35 a 70 min). Por dobra, o binário treina 72 redes distintas (C1 18,
+H1 36, H2 18) e cada um dos outros três cenários 126 (mais H3 36 e C1-ord 18).
+Nas 4 dobras são 1.800, mais 360 réplicas por semente (18 combinações de
+família × cenário × 4 dobras × 5) e 96 treinos do `c0_rf`: 2.256 treinos,
+cerca de **80 dias** de GPU. Circuitos maiores (8 qubits, 4 camadas) podem ter
+épocas mais lentas. Para um subconjunto:
 
 ```bash
 TASKS="binary multiclass" FAMILIES="c0_rf c1_bottleneck h1_vqc" nohup bash scripts/run_server.sh > /dev/null 2>&1 &
