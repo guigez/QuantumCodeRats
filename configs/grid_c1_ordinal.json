@@ -11,7 +11,7 @@
     "pretrained": true,
     "train_layer4": true,
     "epochs": 200,
-    "patience": 15,
+    "patience": 8,
     "lr_patience": 6,
     "batch_size": 32,
     "learning_rate": 0.0001,
@@ -35,5 +35,6 @@
   },
   "skip_tasks": ["binary"],
   "_nota_skip": "com duas classes a saida ordinal e uma regressao logistica, equivalente a softmax",
-  "_nota_grid": "Grid espelhado do H3, igual ao do C1: n_qubits {4, 6, 8} x n_layers {1, 2, 4} x core_learning_rate {1e-3, 1e-2} x c1_match {strongly, basic}: 36 candidatos. Controle classico do H3."
+  "_nota_grid": "Grid espelhado do H3, igual ao do C1: n_qubits {4, 6, 8} x n_layers {1, 2, 4} x core_learning_rate {1e-3, 1e-2} x c1_match {strongly, basic}: 36 candidatos. Controle classico do H3.",
+  "_nota_paciencia": "Paciencia do early stopping 8 (o classico usou 15). Simulacao nos 112 treinos de ResNet50 da execucao classica: 33% menos epocas e a mesma melhor epoca em 109; os 3 que mudariam sao replicas, com perda de 0,002 a 0,012 no F1 de validacao. Nos 16 treinos distintos ja concluidos desta execucao, nenhum mudaria. 8 e o minimo que deixa a taxa reduzida (lr_patience 6) ter 2 epocas para melhorar antes da parada."
 }

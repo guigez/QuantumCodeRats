@@ -40,6 +40,16 @@ Diferenças de treino entre as famílias, todas registradas em
 - `train_log.csv` grava a norma média do gradiente do circuito por época, para
   diagnosticar barren plateau.
 
+Todas as famílias, inclusive o `c0_rf`, usam **paciência 8** no early stopping
+(o clássico usou 15), mantendo a redução da taxa após 6 épocas sem melhora.
+Como o treino é determinístico, dá para simular nos logs existentes onde cada
+treino teria parado. Nos 112 treinos de ResNet50 da execução clássica, a
+paciência 8 corta 33% das épocas e termina no mesmo modelo em 109; os 3 que
+mudariam são réplicas por semente, com perda de 0,002 a 0,012 no F1 de
+validação. Nos 16 treinos distintos já concluídos nesta execução, nenhum
+mudaria. 8 é o mínimo que dá à taxa reduzida 2 épocas para melhorar antes da
+parada.
+
 ### Grid
 
 | famílias | grid | candidatos por dobra |
@@ -182,13 +192,14 @@ tem resultados, use `EXTRA_ARGS="--force"` ou aponte `RESULTS` para uma pasta
 nova.
 
 Custo: na execução de outubro de 2026, cada época levou ~2 min (c0_rf e C1) a
-~2 min 17 s (H1 pequeno), e cada treino, com o early stopping, ~51 min em
-média (35 a 70 min). Por dobra, o binário treina 72 redes distintas (C1 18,
-H1 36, H2 18) e cada um dos outros três cenários 126 (mais H3 36 e C1-ord 18).
-Nas 4 dobras são 1.800, mais 360 réplicas por semente (18 combinações de
-família × cenário × 4 dobras × 5) e 96 treinos do `c0_rf`: 2.256 treinos,
-cerca de **80 dias** de GPU. Circuitos maiores (8 qubits, 4 camadas) podem ter
-épocas mais lentas. Para um subconjunto:
+~2 min 17 s (H1 pequeno), e cada treino, com paciência 15, ~51 min em média
+(35 a 70 min). A paciência 8 corta as 7 épocas finais de cada treino, ~14 min,
+e deixa a média perto de 37 min. Por dobra, o binário treina 72 redes
+distintas (C1 18, H1 36, H2 18) e cada um dos outros três cenários 126 (mais H3
+36 e C1-ord 18). Nas 4 dobras são 1.800, mais 360 réplicas por semente (18
+combinações de família × cenário × 4 dobras × 5) e 96 treinos do `c0_rf`: 2.256
+treinos, cerca de **58 dias** de GPU. Circuitos maiores (8 qubits, 4 camadas)
+podem ter épocas mais lentas. Para um subconjunto:
 
 ```bash
 TASKS="binary multiclass" FAMILIES="c0_rf c1_bottleneck h1_vqc" nohup bash scripts/run_server.sh > /dev/null 2>&1 &
