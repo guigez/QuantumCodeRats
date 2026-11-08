@@ -37,6 +37,7 @@
 #   CLASSICAL_RESULTS  so se definida: copia as dobras de la e inclui os bracos
 #                      classicos na agregacao (deixa de ser execucao limpa)
 #   EXTRA_ARGS         argumentos a mais para run_quantum.py (ex.: "--force")
+#   TMPDIR_RUN         pasta dos temporarios do treino  (padrao: $RESULTS/tmp)
 
 set -uo pipefail
 
@@ -62,6 +63,13 @@ WITH_BACKGROUND="${WITH_BACKGROUND:-1}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 
 mkdir -p "$RESULTS"
+
+# Temporarios (memoria compartilhada dos workers do DataLoader, /tmp/pymp-*)
+# fora do /tmp: no servidor o /tmp fica na particao raiz, pequena e dividida
+# com o sistema, e encheu no meio do H1 (Errno 28). /home tem folga.
+export TMPDIR="${TMPDIR_RUN:-$RESULTS/tmp}"
+mkdir -p "$TMPDIR"
+
 LOG="$RESULTS/run_server.log"
 exec >>"$LOG" 2>&1
 echo $$ > "$RESULTS/run_server.pid"
